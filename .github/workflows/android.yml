@@ -1,0 +1,59 @@
+name: Android build (desde ZIP)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.3"
+
+jobs:
+  export-apk:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descomprimir el proyecto
+        run: |
+          unzip -q KingdomsOfMagic.zip
+          ls KingdomsOfMagic
+
+      - name: Preparar plantillas de exportación
+        run: |
+          mkdir -v -p ~/.local/share/godot/export_templates/
+          mv /root/.local/share/godot/export_templates/${GODOT_VERSION}.stable ~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+
+      - name: Configurar Android SDK y keystore de depuración (temporal)
+        run: |
+          mkdir -v -p ~/.config/godot
+          keytool -keyalg RSA -genkeypair -alias androiddebugkey -keypass android \
+            -keystore $GITHUB_WORKSPACE/debug.keystore -storepass android \
+            -dname "CN=Android Debug,O=Android,C=US" -validity 9999 -deststoretype pkcs12
+          cat > ~/.config/godot/editor_settings-4.tres <<EOT
+          [gd_resource type="EditorSettings" format=3]
+          [resource]
+          export/android/android_sdk_path = "/usr/lib/android-sdk"
+          export/android/java_sdk_path = "/usr/lib/jvm/java-17-openjdk-amd64"
+          EOT
+
+      - name: Importar recursos
+        working-directory: KingdomsOfMagic
+        run: godot --headless --verbose --import || true
+
+      - name: Exportar APK de depuración
+        working-directory: KingdomsOfMagic
+        env:
+          GODOT_ANDROID_KEYSTORE_DEBUG_PATH: ${{ github.workspace }}/debug.keystore
+          GODOT_ANDROID_KEYSTORE_DEBUG_USER: androiddebugkey
+          GODOT_ANDROID_KEYSTORE_DEBUG_PASSWORD: android
+        run: |
+          mkdir -p build
+          godot --headless --verbose --export-debug "Android" build/KingdomsOfMagic-debug.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KingdomsOfMagic-debug-apk
+          path: KingdomsOfMagic/build/KingdomsOfMagic-debug.apk
